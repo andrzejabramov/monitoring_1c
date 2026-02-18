@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
 Тестовый скрипт подключения к БД мониторинга 1С
-MVP v0.1 - только проверка записи/чтения
+MVP v0.1 - asyncpg версия
 """
 
 import os
 import sys
+import asyncio
 from datetime import datetime
 
-# Проверка зависимости
 try:
-    import psycopg2
+    import asyncpg
 except ImportError:
-    print("❌ Ошибка: модуль psycopg2 не установлен")
-    print("   Установите: pip install psycopg2-binary")
+    print("❌ Ошибка: модуль asyncpg не установлен")
+    print("   Установите: pip install asyncpg")
     sys.exit(1)
 
 
@@ -22,25 +22,25 @@ def get_db_config():
     return {
         "host": os.getenv("DB_HOST", "localhost"),
         "port": int(os.getenv("DB_HOST_PORT", "5433")),
-        "dbname": os.getenv("DB_NAME", "onec_monitoring"),
+        "database": os.getenv("DB_NAME", "onec_monitoring"),
         "user": os.getenv("DB_USER", "monitor"),
         "password": os.getenv("DB_PASSWORD", "change_me_in_production"),
     }
 
 
-def test_connection():
+async def test_connection():
     """Тест подключения и записи в БД"""
     config = get_db_config()
 
-    print(f"🔌 Подключение к БД: {config['host']}:{config['port']}/{config['dbname']}")
+    print(
+        f"🔌 Подключение к БД: {config['host']}:{config['port']}/{config['database']}"
+    )
 
+    conn = None
     try:
         # Подключение
-        conn = psycopg2.connect(**config)
+        conn = await asyncpg.connect(**config)
         print("✅ Подключение успешно")
-
-        # Курсор
-        cur = conn.cursor()
 
         # Тестовая запись
         test_session = {
@@ -54,52 +54,55 @@ def test_connection():
         }
 
         # INSERT
-        cur.execute(
+        await conn.execute(
             """
             INSERT INTO onec_session_log 
             (session_id, user_name, infobase_name, client_type, start_time, duration_seconds, avg_server_cpu_percent)
-            VALUES (%(session_id)s, %(user_name)s, %(infobase_name)s, %(client_type)s, %(start_time)s, %(duration_seconds)s, %(avg_server_cpu_percent)s)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
         """,
-            test_session,
+            test_session["session_id"],
+            test_session["user_name"],
+            test_session["infobase_name"],
+            test_session["client_type"],
+            test_session["start_time"],
+            test_session["duration_seconds"],
+            test_session["avg_server_cpu_percent"],
         )
 
-        conn.commit()
         print("✅ Тестовая запись добавлена")
 
         # SELECT для подтверждения
-        cur.execute(
+        result = await conn.fetchrow(
             """
             SELECT id, session_id, user_name, start_time 
             FROM onec_session_log 
-            WHERE session_id = %s
+            WHERE session_id = $1
         """,
-            ("test-mvp-001",),
+            "test-mvp-001",
         )
 
-        result = cur.fetchone()
         if result:
             print(
-                f"✅ Подтверждение чтения: id={result[0]}, session={result[1]}, user={result[2]}"
+                f"✅ Подтверждение чтения: id={result['id']}, session={result['session_id']}, user={result['user_name']}"
             )
         else:
             print("❌ Ошибка: запись не найдена после INSERT")
             return False
 
-        # Очистка
-        cur.close()
-        conn.close()
         print("✅ Соединение закрыто")
-
         return True
 
-    except psycopg2.Error as e:
+    except asyncpg.Error as e:
         print(f"❌ Ошибка PostgreSQL: {e}")
         return False
     except Exception as e:
         print(f"❌ Неожиданная ошибка: {e}")
         return False
+    finally:
+        if conn:
+            await conn.close()
 
 
 if __name__ == "__main__":
-    success = test_connection()
+    success = asyncio.run(test_connection())
     sys.exit(0 if success else 1)
