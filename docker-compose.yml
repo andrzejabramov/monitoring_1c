@@ -1,0 +1,46 @@
+services:
+  # ============================================================================
+  # 🔵 PostgreSQL для логов мониторинга и биллинга (MVP)
+  # ============================================================================
+  monitoring-db:
+    image: postgres:15-alpine
+    container_name: onec-monitoring-db
+    restart: unless-stopped
+
+    # Порт 5433 на хосте → 5432 внутри контейнера
+    ports:
+      - "${DB_HOST_PORT:-5433}:5432"
+
+    # Переменные окружения из .env файла
+    environment:
+      - POSTGRES_DB=${DB_NAME:-onec_monitoring}
+      - POSTGRES_USER=${DB_USER:-monitor}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-change_me_in_production}
+
+    # Сохранение данных между перезапусками
+    volumes:
+      # Инициализация БД при первом запуске
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+      # Постоянное хранилище данных
+      - ./database/pgdata:/var/lib/postgresql/data
+
+    # Проверка готовности БД
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-monitor} -d ${DB_NAME:-onec_monitoring}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    # Изолированная сеть
+    networks:
+      - monitoring-network
+
+# Сеть для изоляции сервисов
+networks:
+  monitoring-network:
+    driver: bridge
